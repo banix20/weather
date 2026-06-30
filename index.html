@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Precipitații Previziune - București</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h1>Precipitații Previzionate pentru București</h1>
+    <h2>Total Precipitații 5 zile: <span id="total-precip">Încărcare...</span></h2>
+
+    <div class="chart-container">
+      <canvas id="precipChart" aria-label="Grafic precipitații" role="img"></canvas>
+    </div>
+  </div>
+  
+  <script src="script.js"></script>
+</body>
+</html>
