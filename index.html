@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
+<title>Precipitații Previziune</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  background: #1a202c;
+  color: #e2e8f0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 1.5rem 0.75rem;
+}
+
+.container {
+  width: 100%;
+  max-width: 700px;
+  background: #2d3748;
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+}
+
+h1 {
+  color: #4299e1;
+  font-size: clamp(1.2rem, 5vw, 1.8rem);
+  text-align: center;
+  margin-bottom: 1.25rem;
+}
+
+/* ── Search bar ── */
+.search-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.input-wrap {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+#city-input {
+  width: 100%;
+  padding: 0.7rem 0.9rem;
+  font-size: 16px;          /* ← prevents iOS zoom-on-focus */
+  background: #1a202c;
+  color: #e2e8f0;
+  border: 1px solid #4a5568;
+  border-radius: 0.5rem;
+  outline: none;
+  -webkit-appearance: none;
+}
+
+#city-input:focus { border-color: #4299e1; }
+
+/* ── Suggestions dropdown ── */
+#suggestions {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  background: #1a202c;
+  border: 1px solid #4a5568;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  z-index: 100;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+#suggestions li {
+  list-style: none;
+  padding: 0.65rem 0.9rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+  border-bottom: 1px solid #2d3748;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#suggestions li:last-child { border-bottom: none; }
+#suggestions li:hover,
+#suggestions li.active { background: #2d3748; color: #63b3ed; }
+
+/* ── Buttons ── */
+.btn {
+  flex: 0 0 auto;
+  padding: 0.7rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  white-space: nowrap;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: filter 0.15s;
+}
+.btn:active { filter: brightness(0.85); }
+.btn-search { background: #4299e1; color: #fff; }
+.btn-gps    { background: #2f855a; color: #fff; }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ── Location label ── */
+#location-label {
+  text-align: center;
+  color: #a0aec0;
+  font-size: 0.9rem;
+  min-height: 1.3em;
+  margin-bottom: 0.75rem;
+}
+
+/* ── Total ── */
+.total-line {
+  text-align: center;
+  color: #63b3ed;
+  font-size: clamp(0.95rem, 3vw, 1.2rem);
+  margin-bottom: 1.25rem;
+}
+
+#total-value {
+  font-weight: 700;
+  font-size: 1.4em;
+  color: #f6ad55;
+}
+
+/* ── Chart ── */
+.chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 280px;
+  background: #242e3f;
+  border: 1px solid #4a5568;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+/* ── Responsive ── */
+@media (max-width: 560px) {
+  body { padding: 0.75rem 0.4rem; }
+  .container { padding: 1rem; }
+
+  .search-row { flex-direction: column; }
+  .btn { width: 100%; padding: 0.8rem; }
+
+  .chart-wrap { height: 230px; }
+}
+
+@media (max-width: 360px) {
+  .chart-wrap { height: 200px; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Precipitații Previzionate</h1>
+
+  <div class="search-row">
+    <div class="input-wrap">
+      <input
+        id="city-input"
+        type="text"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="none"
+        spellcheck="false"
+        placeholder="Caută un oraș…"
+      />
+      <ul id="suggestions"></ul>
+    </div>
+    <button class="btn btn-search" id="btn-search">🔍 Caută</button>
+    <button class="btn btn-gps"    id="btn-gps">📍 GPS</button>
+  </div>
+
+  <p id="location-label"></p>
+  <p class="total-line">Total precipitații 5 zile: <span id="total-value">Se încarcă…</span></p>
+
+  <div class="chart-wrap">
+    <canvas id="chart"></canvas>
+  </div>
+</div>
+
+<script>
+(function () {
+  var API_KEY = 'ee0752dafdd6f36c381645918f861faa';
+  var chartInstance = null;
+  var suggestions   = [];
+  var activeIdx     = -1;
+  var debounce      = null;
+
+  var input       = document.getElementById('city-input');
+  var sugBox      = document.getElementById('suggestions');
+  var btnSearch   = document.getElementById('btn-search');
+  var btnGps      = document.getElementById('btn-gps');
+  var labelLoc    = document.getElementById('location-label');
+  var labelTotal  = document.getElementById('total-value');
+
+  /* ── Helpers ── */
+  function owmUrl(path, params) {
+    var qs = Object.entries(params).map(function(kv){
+      return encodeURIComponent(kv[0]) + '=' + encodeURIComponent(kv[1]);
+    }).join('&');
+    return 'https://api.openweathermap.org/' + path + '?' + qs + '&appid=' + API_KEY;
+  }
+
+  function fmt(place) {
+    return [place.name, place.state, place.country].filter(Boolean).join(', ');
+  }
+
+  /* ── Suggestions ── */
+  function hideSug() {
+    sugBox.style.display = 'none';
+    sugBox.innerHTML = '';
+    suggestions = [];
+    activeIdx   = -1;
+  }
+
+  function showSug(places) {
+    suggestions = places;
+    activeIdx   = -1;
+    if (!places.length) { hideSug(); return; }
+    sugBox.innerHTML = places.map(function(p, i) {
+      return '<li data-i="' + i + '">' + fmt(p) + '</li>';
+    }).join('');
+    sugBox.style.display = 'block';
+  }
+
+  function pickIdx(i) {
+    if (!suggestions[i]) return;
+    input.value = fmt(suggestions[i]);
+    hideSug();
+    loadByCoords(suggestions[i].lat, suggestions[i].lon);
+  }
+
+  function setActive(i) {
+    activeIdx = (i + suggestions.length) % suggestions.length;
+    Array.from(sugBox.children).forEach(function(li, j) {
+      li.classList.toggle('active', j === activeIdx);
+    });
+  }
+
+  /* ── Tap / click on suggestion ── */
+  sugBox.addEventListener('touchstart', function(e) {
+    var li = e.target.closest('li');
+    if (!li) return;
+    e.preventDefault();
+    pickIdx(+li.dataset.i);
+  }, { passive: false });
+
+  sugBox.addEventListener('mousedown', function(e) {
+    var li = e.target.closest('li');
+    if (!li) return;
+    e.preventDefault();
+    pickIdx(+li.dataset.i);
+  });
+
+  /* ── Keyboard nav ── */
+  input.addEventListener('keydown', function(e) {
+    if (sugBox.style.display === 'none') return;
+    if (e.key === 'ArrowDown')  { e.preventDefault(); setActive(activeIdx + 1); }
+    if (e.key === 'ArrowUp')    { e.preventDefault(); setActive(activeIdx - 1); }
+    if (e.key === 'Enter' && activeIdx >= 0) { e.preventDefault(); pickIdx(activeIdx); }
+    if (e.key === 'Escape')     { hideSug(); }
+  });
+
+  /* ── Input → debounced geocoding ── */
+  input.addEventListener('input', function() {
+    clearTimeout(debounce);
+    var q = input.value.trim();
+    if (q.length < 2) { hideSug(); return; }
+    debounce = setTimeout(function() {
+      fetch(owmUrl('geo/1.0/direct', { q: q, limit: 5 }))
+        .then(function(r) { return r.json(); })
+        .then(showSug)
+        .catch(hideSug);
+    }, 300);
+  });
+
+  /* ── Hide when clicking outside ── */
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('.input-wrap')) hideSug();
+  });
+
+  /* ── Search button ── */
+  btnSearch.addEventListener('click', function() {
+    var q = input.value.trim();
+    if (!q) return;
+    hideSug();
+    loadByCity(q);
+  });
+
+  document.getElementById('city-input').closest('.container')
+    .querySelector('.search-row')
+    .addEventListener('submit', function(e) { e.preventDefault(); });
+
+  /* prevent form submit on Enter when no suggestion active */
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && activeIdx < 0) {
+      e.preventDefault();
+      var q = input.value.trim();
+      if (q) { hideSug(); loadByCity(q); }
+    }
+  });
+
+  /* ── GPS button ── */
+  btnGps.addEventListener('click', function() {
+    hideSug();
+    if (!navigator.geolocation) {
+      labelLoc.textContent = 'Geolocation nu e suportat în acest browser.';
+      return;
+    }
+    btnGps.disabled = true;
+    btnGps.textContent = '⏳ Se localizează…';
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        input.value = '';
+        loadByCoords(pos.coords.latitude, pos.coords.longitude);
+        btnGps.disabled = false;
+        btnGps.textContent = '📍 GPS';
+      },
+      function() {
+        labelLoc.textContent = 'Nu am putut obține locația. Verifică permisiunile.';
+        btnGps.disabled = false;
+        btnGps.textContent = '📍 GPS';
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
+
+  /* ── Load weather ── */
+  function loadByCity(city) {
+    load(owmUrl('data/2.5/forecast', { q: city, units: 'metric', lang: 'ro' }));
+  }
+
+  function loadByCoords(lat, lon) {
+    load(owmUrl('data/2.5/forecast', { lat: lat, lon: lon, units: 'metric', lang: 'ro' }));
+  }
+
+  function load(url) {
+    labelTotal.textContent = 'Se încarcă…';
+    fetch(url)
+      .then(function(r) {
+        if (!r.ok) throw new Error(r.status === 404 ? 'Orașul nu a fost găsit.' : 'Eroare HTTP ' + r.status);
+        return r.json();
+      })
+      .then(render)
+      .catch(function(err) {
+        labelTotal.textContent = 'Eroare';
+        labelLoc.textContent   = err.message;
+      });
+  }
+
+  function render(data) {
+    /* location name */
+    if (data.city) {
+      labelLoc.textContent = data.city.name + (data.city.country ? ', ' + data.city.country : '');
+    }
+
+    /* aggregate precip by day */
+    var map = {};
+    data.list.forEach(function(item) {
+      var d = new Date(item.dt * 1000)
+        .toLocaleDateString('ro-RO', { weekday: 'short', day: 'numeric', month: 'short' });
+      map[d] = (map[d] || 0) + (item.rain && item.rain['3h'] ? item.rain['3h'] : 0);
+    });
+
+    var days   = Object.keys(map);
+    var values = days.map(function(d) { return map[d]; });
+    var total  = values.reduce(function(s, v) { return s + v; }, 0);
+    labelTotal.textContent = total.toFixed(1) + ' mm';
+
+    /* chart */
+    var ctx = document.getElementById('chart').getContext('2d');
+    if (chartInstance) chartInstance.destroy();
+    chartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: days,
+        datasets: [{
+          label: 'Precipitații (mm)',
+          data: values.map(function(v) { return v.toFixed(2); }),
+          backgroundColor: 'rgba(59,130,246,0.5)',
+          borderColor:     'rgba(59,130,246,1)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: { display: true, text: 'mm', color: '#a0aec0' },
+            ticks: { color: '#a0aec0' },
+            grid:  { color: '#2d3748' }
+          },
+          x: {
+            ticks: { color: '#a0aec0' },
+            grid:  { color: '#2d3748' }
+          }
+        },
+        plugins: { legend: { labels: { color: '#e2e8f0' } } }
+      }
+    });
+  }
+
+  /* ── Init ── */
+  loadByCity('Bucharest,RO');
+})();
+</script>
+</body>
+</html>
